@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="nl">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TempoTrainer</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+      transition: background .4s;
+    }
+
+    a {
+      text-decoration: none;
+      color: white;
+    }
+
+    .phase-up { background: #c62828; }
+    .phase-hold { background: #f57c00; }
+    .phase-down { background: #1565c0; }
+    .phase-rest { background: #2e7d32; }
+    .phase-finish { background: #4caf50; }
+
+    .card {
+      font-size: 18px;
+      background: #222;
+      padding: 15px;
+      border-radius: 12px;
+      margin-bottom: 15px;
+    }
+
+    input,
+    button,
+    select {
+      padding: 8px;
+      margin: 4px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    #status {
+      font-size: 48px;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .bar {
+      height: 24px;
+      background: #444;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    #fill {
+      height: 100%;
+      width: 0;
+      background: #4caf50;
+    }
+
+    #overlayTimer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 30vw;
+      font-weight: bold;
+      background: rgba(0, 0, 0, .2);
+      color: white;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>
+    <a href="https://magdajan.eu/workout_compleet/tempotrainer/">TempoTrainer</a>
+    &nbsp;&nbsp;
+    <button onclick="history.back()">Go Back</button>
+  </h1>
+
+  <div id="overlayTimer">✅</div>
+
+  <div class="card">
+  <!--  <select id="programList"></select>
+    <button id="loadBtn">Laden</button>
+    <button id="saveProgramBtn">Opslaan</button>
+    <button id="exportBtn">Export</button> -->
+	<button id="voiceBtn">🎤 Voice Control</button>
+    <button id="fullscreenBtn">FullScreen</button>
+    <br>
+   <!-- <input type="file" id="importFile"> -->
+    <hr>
+    <input id="c" type="number" step="0.1" value="2.0"> Op (sec)<br>
+    <input id="p" type="number" step="0.1" value="1.0"> Vast (sec)<br>
+    <input id="e" type="number" step="0.1" value="4.0"> Neer (sec)<br>
+    <input id="r" type="number" value="10"> Reps (nr)<br>
+    <input id="s" type="number" value="3"> Sets (nr)<br>
+    <input id="rest" type="number" value="60"> Rust (sec)<br>
+    <button onclick="startTraining()">Start (s)</button>
+    <button id="pauseBtn">Pauze (space)</button>
+	<button onclick="stopTraining()">Stop</button>
+  </div>
+
+  <div class="card">
+    <div class="bar">
+      <div id="fill"></div>
+    </div>
+    <p>
+      Set: <span id="setnr">0</span> | Rep: <span id="repnr">0</span><br>
+      Trainingstijd: <span id="totalTime"></span>
+      Resterend: <span id="eta"></span>
+    </p>
+  </div>
+
+  <div class="card">
+    <p>🎤 Voice Commands</p>
+    <ul>
+      <li>START: start</li>
+      <li>PAUZE: pauze</li>
+      <li>HERVAT: verder</li>
+      <li>TERUG: opnieuw</li>
+      <li>STOP: stop</li>
+      <li>ALLES SNELLER: snel...</li>
+      <li>ALLES LANGZAMER: lang...</li>
+	  <li>OP SNELLER: op</li>
+      <li>OP TRAGER: trager</li>
+	  <li>VAST LANGER: houden</li>
+	  <li>VAST KORTER: kort</li>
+	  <li>OMLAAG SNELLER: neer</li>
+	  <li>OMLAAG TRAGER: vlot</li>
+	  <li>RUST LANGER: rust</li>
+	  <li>RUST KORTER: minder</li>
+	  <li>REPS +1: rep</li>
+      <li>VOLLEDIG SCHERM: beeld</li>
+    </ul>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = AudioCtx ? new AudioCtx() : null;
+
+  function resumeAudioContextIfNeeded() {
+    if (!audioCtx) return;
+    if (audioCtx.state === "suspended" && audioCtx.resume) {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+
+  function playBeep(type = "click", duration = 120, volume = 0.8) {
+    if (!audioCtx) return;
+    resumeAudioContextIfNeeded();
+
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    const freqs = { up: 880, down: 440, hold: 660, rest: 440, click: 1200 };
+
+    o.type = "sine";
+    o.frequency.value = freqs[type] || 800;
+    g.gain.value = 0;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    const tOff = now + duration / 1000;
+
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(volume, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, tOff);
+    o.start(now);
+    o.stop(tOff + 0.02);
+  }
+
+  const overlayTimer = document.getElementById("overlayTimer");
+  const fill = document.getElementById("fill");
+  const totalTime = document.getElementById("totalTime");
+  const eta = document.getElementById("eta");
+  const setnr = document.getElementById("setnr");
+  const repnr = document.getElementById("repnr");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const fullscreenBtn = document.getElementById("fullscreenBtn");
+
+  const programList = document.getElementById("programList");
+  const loadBtn = document.getElementById("loadBtn");
+  const saveProgramBtn = document.getElementById("saveProgramBtn");
+  const exportBtn = document.getElementById("exportBtn");
+  const importFile = document.getElementById("importFile");
+
+  const cInput = document.getElementById("c");
+  const pInput = document.getElementById("p");
+  const eInput = document.getElementById("e");
+  const rInput = document.getElementById("r");
+  const sInput = document.getElementById("s");
+  const restInput = document.getElementById("rest");
+
+  const statusEl = document.getElementById("status");
+
+  let chartInstance = null;
+
+  let paused = false;
+  let done = 0;
+  let totalTrainingSecondsGlobal = 0;
+  let trainingRunning = false;
+  let cancelRequested = false;
+  let countdownActive = false;
+
+  let currentC = 2;
+  let currentP = 1;
+  let currentE = 4;
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+
+  const phaseClasses = ["phase-up", "phase-hold", "phase-down", "phase-rest", "phase-finish"];
+
+  function setPhaseClass(klass) {
+    phaseClasses.forEach(c => document.body.classList.remove(c));
+    if (klass) document.body.classList.add(klass);
+  }
+
+  async function waitPause() {
+    while (paused && !cancelRequested) {
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+
+  function recalculateTrainingTime() {
+    const C = Math.max(0, Number(cInput?.value || 0));
+    const P = Math.max(0, Number(pInput?.value || 0));
+    const E = Math.max(0, Number(eInput?.value || 0));
+    const R = Math.max(0, Math.floor(Number(rInput?.value || 0)));
+    const S = Math.max(0, Math.floor(Number(sInput?.value || 0)));
+    const REST = Math.max(0, Math.floor(Number(restInput?.value || 0)));
+
+    const repTime = C + P + E;
+    totalTrainingSecondsGlobal = repTime * R * S + Math.max(0, S - 1) * REST;
+
+    if (totalTime) totalTime.textContent = formatTime(totalTrainingSecondsGlobal);
+    const remaining = Math.max(0, totalTrainingSecondsGlobal - done);
+    if (eta) eta.textContent = formatTime(remaining);
+  }
+
+  let lastBeepSecond = -1;
+
+  async function runPhase(durationSec, options = {}, doneBase = done) {
+    if (cancelRequested) return;
+
+    const { symbol = "", beep = null, perSecond = false, countdownEmoji = "" } = options;
+
+    if (!durationSec || durationSec <= 0) {
+      if (beep) playBeep(beep);
+      if (overlayTimer) overlayTimer.textContent = symbol || "";
+      return;
+    }
+
+    if (beep) playBeep(beep);
+
+    const durationMs = Math.round(durationSec * 1000);
+    let start = performance.now();
+    let end = start + durationMs;
+
+    return new Promise(async (resolve) => {
+      let pausedWatcherActive = true;
+
+      (async function pauseWatcher() {
+        while (pausedWatcherActive && !cancelRequested) {
+          if (!paused) {
+            await new Promise(r => setTimeout(r, 150));
+            continue;
+          }
+          const pStart = performance.now();
+          await waitPause();
+          const pEnd = performance.now();
+          const pausedMs = pEnd - pStart;
+          end += pausedMs;
+          start += pausedMs;
+        }
+      })();
+
+      async function loop() {
+        if (cancelRequested) {
+          pausedWatcherActive = false;
+          resolve();
+          return;
+        }
+
+        if (paused) {
+          await new Promise(r => setTimeout(r, 120));
+          requestAnimationFrame(loop);
+          return;
+        }
+
+        const now = performance.now();
+        const elapsed = Math.max(0, Math.min(durationMs, now - start));
+        const currentSecond = Math.floor(elapsed / 1000);
+
+        if (currentSecond !== lastBeepSecond) {
+          lastBeepSecond = currentSecond;
+          playBeep('click', 50, 0.2);
+        }
+
+        done = doneBase + elapsed / 1000;
+
+        if (totalTrainingSecondsGlobal > 0 && done > totalTrainingSecondsGlobal) {
+          done = totalTrainingSecondsGlobal;
+        }
+
+        if (fill && totalTrainingSecondsGlobal > 0) {
+          const pct = Math.min(100, (done / totalTrainingSecondsGlobal) * 100);
+          fill.style.width = pct.toFixed(2) + "%";
+        }
+
+        if (eta && totalTrainingSecondsGlobal > 0) {
+          const remainingTotal = Math.max(0, Math.ceil(totalTrainingSecondsGlobal - done));
+          eta.textContent = formatTime(remainingTotal);
+        }
+
+        if (overlayTimer) {
+          if (perSecond) {
+            const remPhase = Math.max(0, Math.ceil((end - now) / 1000));
+            overlayTimer.textContent = countdownEmoji ? `${countdownEmoji} ${remPhase}` : `⏱️ ${remPhase}`;
+          } else {
+            overlayTimer.textContent = symbol;
+          }
+        }
+
+        if (now >= end) {
+          done = Math.min(totalTrainingSecondsGlobal, doneBase + durationSec);
+
+          if (fill && totalTrainingSecondsGlobal > 0) {
+            const pct = Math.min(100, (done / totalTrainingSecondsGlobal) * 100);
+            fill.style.width = pct.toFixed(2) + "%";
+          }
+
+          if (eta && totalTrainingSecondsGlobal > 0) {
+            const remainingTotal = Math.max(0, Math.ceil(totalTrainingSecondsGlobal - done));
+            eta.textContent = formatTime(remainingTotal);
+          }
+
+          pausedWatcherActive = false;
+          resolve();
+          return;
+        }
+
+        requestAnimationFrame(loop);
+      }
+
+      requestAnimationFrame(loop);
+    });
+  }
+
+  async function startTrainingInner() {
+    if (trainingRunning) return;
+    trainingRunning = true;
+    cancelRequested = false;
+    resumeAudioContextIfNeeded();
+
+    try {
+      const C = Math.max(0, Number(cInput?.value || 0));
+      const P = Math.max(0, Number(pInput?.value || 0));
+      const E = Math.max(0, Number(eInput?.value || 0));
+      const R = Math.max(0, Math.floor(Number(rInput?.value || 0)));
+      const S = Math.max(0, Math.floor(Number(sInput?.value || 0)));
+      const REST = Math.max(0, Math.floor(Number(restInput?.value || 0)));
+
+      if (!R || !S) {
+        if (statusEl) statusEl.textContent = "Voer reps en sets in";
+        trainingRunning = false;
+        return;
+      }
+
+      const repTime = C + P + E;
+      const totalTrainingSeconds = repTime * R * S + Math.max(0, S - 1) * REST;
+      totalTrainingSecondsGlobal = totalTrainingSeconds;
+      done = 0;
+
+      if (fill) fill.style.width = "0%";
+      if (totalTime) totalTime.textContent = formatTime(totalTrainingSeconds);
+      if (eta) eta.textContent = formatTime(totalTrainingSeconds);
+
+      countdownActive = true;
+      for (let i = 3; i > 0; i--) {
+        if (statusEl) statusEl.textContent = "Start over " + i;
+        if (overlayTimer) overlayTimer.textContent = "⏱️" + i;
+		playBeep('click', 50, 0.2);
+        await new Promise(r => setTimeout(r, 1000));
+        if (cancelRequested) break;
+      }
+      countdownActive = false;
+
+      if (cancelRequested) {
+        trainingRunning = false;
+        return;
+      }
+
+      for (let set = 1; set <= S; set++) {
+        if (cancelRequested) break;
+        if (setnr) setnr.textContent = set;
+
+        for (let rep = 1; rep <= R; rep++) {
+          if (cancelRequested) break;
+          await waitPause();
+          if (repnr) repnr.textContent = rep;
+
+          setPhaseClass("phase-up");
+          await runPhase(currentC, { symbol: "🚀", beep: "up", perSecond: true, countdownEmoji: "🚀" }, done);
+          if (cancelRequested) break;
+
+          setPhaseClass("phase-hold");
+          await runPhase(currentP, { symbol: "💪", beep: "hold", perSecond: true, countdownEmoji: "💪" }, done);
+          if (cancelRequested) break;
+
+          setPhaseClass("phase-down");
+          await runPhase(currentE, { symbol: "⬇️", beep: "down", perSecond: true, countdownEmoji: "⬇️" }, done);
+          if (cancelRequested) break;
+        }
+
+        if (cancelRequested) break;
+
+        if (set < S) {
+          setPhaseClass("phase-rest");
+          await runPhase(REST, { symbol: "⏱️", perSecond: true }, done);
+        }
+      }
+
+      if (!cancelRequested) {
+        setPhaseClass("phase-finish");
+        if (statusEl) statusEl.textContent = "VOLTOOID";
+        if (overlayTimer) overlayTimer.textContent = "✅";
+
+        const st = stats();
+        st.count++;
+        st.sets += Number(sInput?.value || 0);
+        st.reps += Number(sInput?.value || 0) * Number(rInput?.value || 0);
+        localStorage.setItem("strengthStats", JSON.stringify(st));
+
+        const h = historyData();
+        h.push({
+          date: new Date().toISOString(),
+          reps: Number(sInput?.value || 0) * Number(rInput?.value || 0),
+          sets: Number(sInput?.value || 0),
+        });
+        localStorage.setItem("trainingHistory", JSON.stringify(h));
+
+        done = totalTrainingSecondsGlobal;
+        if (fill) fill.style.width = "100%";
+        showStats();
+      } else {
+        if (statusEl) statusEl.textContent = "Geannuleerd";
+        if (overlayTimer) overlayTimer.textContent = "";
+      }
+    } catch (err) {
+      console.error("Training error", err);
+    } finally {
+      trainingRunning = false;
+      cancelRequested = false;
+    }
+  }
+
+  function startTraining() {
+    resumeAudioContextIfNeeded();
+    startTrainingInner();
+  }
+
+  function stopTraining() {
+    if (!trainingRunning) return;
+    cancelRequested = true;
+  }
+
+  async function restartTraining() {
+    stopTraining();
+    while (trainingRunning) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    startTraining();
+  }
+
+  if (pauseBtn) {
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Hervat" : "Pauze";
+    });
+  }
+
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener("click", () => {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    });
+  }
+
+  function refreshPrograms() {
+    if (!programList) return;
+    const arr = JSON.parse(localStorage.getItem("programs") || "[]");
+    programList.innerHTML = "";
+    arr.forEach((p, i) => {
+      const o = document.createElement("option");
+      o.value = i;
+      o.textContent = p.name || `Schema ${i + 1}`;
+      programList.appendChild(o);
+    });
+  }
+/* not used anymore... obsolete
+
+  if (saveProgramBtn) {
+    saveProgramBtn.addEventListener("click", () => {
+      const arr = JSON.parse(localStorage.getItem("programs") || "[]");
+      arr.push({
+        name: prompt("Naam schema") || "Schema",
+        concentric: +cInput.value,
+        pause: +pInput.value,
+        eccentric: +eInput.value,
+        reps: +rInput.value,
+        sets: +sInput.value,
+        rest: +restInput.value,
+      });
+      localStorage.setItem("programs", JSON.stringify(arr));
+      refreshPrograms();
+    });
+  }
+
+  if (loadBtn) {
+    loadBtn.addEventListener("click", () => {
+      const arr = JSON.parse(localStorage.getItem("programs") || "[]");
+      const sel = programList?.value;
+      if (sel == null) return;
+      const prog = arr[sel];
+      if (!prog) return;
+      cInput.value = prog.concentric ?? prog.c ?? cInput.value;
+      pInput.value = prog.pause ?? prog.p ?? pInput.value;
+      eInput.value = prog.eccentric ?? prog.e ?? eInput.value;
+      rInput.value = prog.reps ?? prog.r ?? rInput.value;
+      sInput.value = prog.sets ?? prog.s ?? sInput.value;
+      restInput.value = prog.rest ?? restInput.value;
+    });
+  }
+
+  if (exportBtn) {
+    exportBtn.addEventListener("click", () => {
+      const arr = JSON.parse(localStorage.getItem("programs") || "[]");
+      const p = arr[programList?.value];
+      if (!p) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(p, null, 2)], { type: "application/json" }));
+      a.download = (p.name || "schema") + ".json";
+      a.click();
+    });
+  }
+
+  if (importFile) {
+    importFile.addEventListener("change", (ev) => {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const p = JSON.parse(r.result);
+          const arr = JSON.parse(localStorage.getItem("programs") || "[]");
+          arr.push(p);
+          localStorage.setItem("programs", JSON.stringify(arr));
+          refreshPrograms();
+        } catch (e) {
+          console.error("Import failed", e);
+        }
+      };
+      r.readAsText(f);
+    });
+  }
+  
+  */
+
+  window.addEventListener("keydown", (ev) => {
+    const key = ev.key.toLowerCase();
+    if (key === " ") {
+      ev.preventDefault();
+      paused = !paused;
+      if (pauseBtn) pauseBtn.textContent = paused ? "Hervat" : "Pauze";
+    } else if (key === "f") {
+      ev.preventDefault();
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else if (key === "s") {
+      ev.preventDefault();
+      startTraining();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      stopTraining();
+    }
+  });
+
+  const voiceBtn = document.getElementById("voiceBtn");
+  let recognition = null;
+  let voiceEnabled = false;
+
+  function initVoiceControl() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn("Speech recognition not supported");
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = "nl-NL";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      const command = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+      console.log("Voice command:", command);
+
+      if (command.includes("start") || command.includes("begin")) {
+        startTraining();
+        return;
+      }
+
+      if (command.includes("pauze") && !countdownActive) {
+        paused = true;
+        if (pauseBtn) pauseBtn.textContent = "Hervat";
+        overlayTimer.textContent = "⏸️";
+        return;
+      }
+
+      if (command.includes("hervat") || command.includes("verder")) {
+        paused = false;
+        if (pauseBtn) pauseBtn.textContent = "Pauze";
+        return;
+      }
+
+      if (command.includes("opnieuw") || command.includes("terug")) {
+        restartTraining();
+        return;
+      }
+
+      if (command.includes("stop") && !countdownActive) {
+        stopTraining();
+        return;
+      }
+
+      if (command.includes("snel")) {
+        currentC = Math.max(1, currentC - 0.6);
+        currentP = Math.max(1, currentP - 0.4);
+        currentE = Math.max(1, currentE - 0.8);
+        cInput.value = currentC;
+        pInput.value = currentP;
+        eInput.value = currentE;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("lang")) {
+        currentC = Math.max(1, currentC + 0.6);
+        currentP = Math.max(1, currentP + 0.4);
+        currentE = Math.max(1, currentE + 0.8);
+        cInput.value = currentC;
+        pInput.value = currentP;
+        eInput.value = currentE;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("trager")) {
+        currentC = Math.max(1, currentC + 0.5);
+        cInput.value = currentC;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("op")) {
+        currentC = Math.max(1, currentC - 0.5);
+        cInput.value = currentC;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("houd")) {
+        currentP = Math.max(1, currentP + 0.5);
+        pInput.value = currentP;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("kort")) {
+        currentP = Math.max(1, currentP - 0.5);
+        pInput.value = currentP;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("neer")) {
+        currentE = Math.max(1, currentE + 0.5);
+        eInput.value = currentE;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("vlot")) {
+        currentE = Math.max(1, currentE - 0.5);
+        eInput.value = currentE;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("rust")) {
+        restInput.value = +restInput.value + 10;
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command.includes("minder")) {
+        restInput.value = Math.max(0, +restInput.value - 10);
+        recalculateTrainingTime();
+        return;
+      }
+
+      if (command === "rep" ||
+          command === "reps" ||
+          command === "rap" ||
+          command === "herhaling" ||
+          command === "herhalingen") {
+        rInput.value = Number(rInput.value) + 1;
+        recalculateTrainingTime();
+        console.log("REP +1:", rInput.value);
+        return;
+      }
+
+      if (command.includes("scherm") || command.includes("beeld")) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    };
+
+    recognition.onend = () => {
+      if (voiceEnabled) {
+        recognition.start();
+      }
+    };
+
+    voiceBtn.addEventListener("click", () => {
+      if (!voiceEnabled) {
+        recognition.start();
+        voiceEnabled = true;
+        voiceBtn.textContent = "🎤 Listening";
+      } else {
+        recognition.stop();
+        voiceEnabled = false;
+        voiceBtn.textContent = "🎤 Voice Control";
+      }
+    });
+  }
+
+  function init() {
+    if (fill) fill.style.width = "0%";
+    refreshPrograms();
+    initVoiceControl();
+
+    window.startTraining = startTraining;
+    window.stopTraining = stopTraining;
+
+    if (!document.getElementById("training-fill-transition")) {
+      const style = document.createElement("style");
+      style.id = "training-fill-transition";
+      style.textContent = "#fill { transition: width 80ms linear; }";
+      document.head.appendChild(style);
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+
+</html>
