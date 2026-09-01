@@ -47,9 +47,10 @@ overlay, per-second countdowns, audible beeps, and progress tracking.
 
 ## Files
 
-- `index.html` — the entire application (single file, no dependencies)
+- `index.html`
+- `style.css`
 
 ## Notes
 
-- (Obsolete) Training stats and history are saved to `localStorage`.
+- (Grayed out, as leftover from my original plan) Training stats and history are saved to `localStorage`.
 - The `totalTime` / `Resterend` values recompute live when settings or voice change.
